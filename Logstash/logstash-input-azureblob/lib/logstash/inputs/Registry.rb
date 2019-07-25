@@ -3,9 +3,9 @@ require 'forwardable'
 
 require "#{__dir__}/RegistryItem.rb"
 
-class LogStash::Inputs::Registry
+class Registry
 	def initialize(opts={})
-		@itemClass = opts[:itemClass] || LogStash::Inputs::RegistryItem
+		@itemClass = opts[:itemClass] || RegistryItem
 		@content = opts[:content] || {}
 	end
 	attr_reader :itemClass, :content
@@ -21,5 +21,14 @@ class LogStash::Inputs::Registry
 	end
 	def add(item)
 		content[item.file_path] = item
+	end
+	def addByData(*args)
+		add(itemClass.new(*args))
+	end
+	def unregisterReader(reader)
+		each {|key, item|
+			item.reader = nil if item.reader == reader
+		}
+		self
 	end
 end

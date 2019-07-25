@@ -145,7 +145,7 @@ class LogStash::Inputs::LogstashInputAzureblob < LogStash::Inputs::Base
 	end
 
 	def stop
-		uregisterReader
+		unregisterReader
 	end
 
 	# Start processing the next item.
@@ -266,10 +266,9 @@ class LogStash::Inputs::LogstashInputAzureblob < LogStash::Inputs::Base
 	end
 
 	def request_registry_update(start_index, content_length, blob_name, new_etag, gen)
-		new_offset = start_index
-		new_offset += content_length unless content_length.nil?
-		@logger.debug("New registry offset: #{new_offset}")
-		registryItem = LogStash::Inputs::RegistryItem.new(blob_name, new_etag, nil, new_offset, gen)
+		offset = (start_index || 0) + (content_length || 0)
+		@logger.debug("New registry offset: #{offset}")
+		registryItem = RegistryItem.new(blob_name, new_etag, nil, offset, gen)
 		updateRegistryWithItem(registryItem)
 	end
 
@@ -283,23 +282,18 @@ class LogStash::Inputs::LogstashInputAzureblob < LogStash::Inputs::Base
 
 			if registryBlob
 				registry = loadRegistry
-				lease = acquireLeaseForRegistryBlob
 			else
 				registry = create_registry(candidate_blobs)
-				lease = acquireLeaseForRegistryBlob
 			end
+			lease = acquireLeaseForRegistryBlob
 
 			picked_blobs = Set.new
 			# Pick up the next candidate
 			picked_blob = nil
 			candidate_blobs.each {|candidate_blob|
 				@logger.debug("candidate_blob: #{candidate_blob.name} content length: #{candidate_blob.properties[:content_length]}")
-				registryItem = registry[candidate_blob.name]
 				# Appending items that doesn't exist in the registry
-				unless registryItem
-					registryItem = LogStash::Inputs::RegistryItem.new(candidate_blob.name, candidate_blob.properties[:etag], nil, 0, 0)
-					registry.add(registryItem)
-				end
+				registryItem = registry[candidate_blob.name] || registry.addByData(candidate_blob.name, candidate_blob.properties[:etag], nil, 0, 0)
 
 				@logger.debug("registryItem offset: #{registryItem.offset}")
 				if registryItem.offset < candidate_blob.properties[:content_length] && (registryItem.reader.nil? || registryItem.reader == @reader)
@@ -364,40 +358,30 @@ class LogStash::Inputs::LogstashInputAzureblob < LogStash::Inputs::Base
 		end
 	end
 
-	def uregisterReader
-		lease = nil
+	def unregisterReader
+		@logger.debug("azureblob : start unregisterReader")
 		begin
-			@logger.debug("azureblob : start uregisterReader")
-			lease = acquireLeaseForRegistryBlob
-			registry = loadRegistry
-			registry.each {|key, item|
-				item.reader = nil if item.reader == @reader
-			}
-			saveRegistry(registry, lease)
+			@registryBlobPersister.unregisterReader(@reader)
 		rescue StandardError=> exc
 			logError(exc)
-		ensure
-			releaseLeaseForRegistryBlob(lease) if lease
 		end
-		@logger.debug("azureblob : End of uregisterReader")
+		@logger.debug("azureblob : End of unregisterReader")
 	end
 
 	# Create a registry file to coordinate between multiple azure blob inputs.
 	def create_registry(blobs)
-		@azure_blob.create_block_blob(container, registry_path, '')
-		lease = acquireLeaseForRegistryBlob
-		registry = LogStash::Inputs::Registry.new
+		registry = @registryBlobPersister.create
+		leaseId = acquireLeaseForRegistryBlob
 		if registry_create_policy == 'resume'
 			initialOffsetGetter = ->(blob){blob.properties[:content_length]}
 		else
 			initialOffsetGetter = ->(blob){0}
 		end
 		blobs.each {|blob|
-			registry.add(LogStash::Inputs::RegistryItem.new(
-				blob.name, blob.properties[:etag], nil, initialOffsetGetter.call(blob), 0))
+			registry.addByData(blob.name, blob.properties[:etag], nil, initialOffsetGetter.call(blob), 0)
 		}
-		saveRegistry(registry, lease)
-		releaseLeaseForRegistryBlob(lease)
+		saveRegistry(registry, leaseId)
+		releaseLeaseForRegistryBlob(leaseId)
 		registry
 	end
 

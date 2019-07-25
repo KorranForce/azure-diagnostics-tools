@@ -1,8 +1,8 @@
 require "#{__dir__}/Registry.rb"
 
-class LogStash::Inputs::RegistryBlobPersister
+class RegistryBlobPersister
 	def initialize(opts={})
-		@registryClass = opts[:registryClass] || LogStash::Inputs::Registry
+		@registryClass = opts[:registryClass] || Registry
 		@azureBlob = opts[:azureBlob] || raise("azureBlob must be specified")
 		@container = opts[:container] || raise("container must be specified")
 		@leaseDuration = opts[:leaseDuration] || raise("leaseDuration must be specified")
@@ -14,15 +14,32 @@ class LogStash::Inputs::RegistryBlobPersister
 		_blob, blobBody = azureBlob.get_blob(container, registryPath)
 		registryClass.new.contentFromJson(blobBody)
 	end
-	def save(registry, leaseId)
+	def save(registry, leaseId=nil)
 		azureBlob.create_block_blob(container, registryPath, registry.to_json, lease_id: leaseId)
 	end
+	def create
+		registry = registryClass.new
+		save(registry)
+		registry
+	end
+
 	def update(registryItem)
 		leaseId = nil
 		begin
 			leaseId = acquireLease
 			registry = load
 			registry.add(registryItem)
+			save(registry, leaseId)
+		ensure
+			releaseLease(leaseId) if leaseId
+		end
+	end
+	def unregisterReader(reader)
+		leaseId = nil
+		begin
+			leaseId = acquireLease
+			registry = load
+			registry.unregisterReader(reader)
 			save(registry, leaseId)
 		ensure
 			releaseLease(leaseId) if leaseId

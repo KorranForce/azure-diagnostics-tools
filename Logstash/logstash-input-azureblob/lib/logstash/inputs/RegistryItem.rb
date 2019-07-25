@@ -1,5 +1,5 @@
 # Registry item to coordinate between mulitple clients
-class LogStash::Inputs::RegistryItem
+class RegistryItem
 	def self.fromHash(hash)
 		new(hash['file_path'], hash['etag'], hash['reader'], hash['offset'], hash['gen'])
 	end
