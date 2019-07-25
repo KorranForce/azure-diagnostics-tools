@@ -287,7 +287,7 @@ class LogStash::Inputs::LogstashInputAzureblob < LogStash::Inputs::Base
 			else
 				registry = create_registry(candidate_blobs)
 			end
-			lease = acquireLeaseForRegistryBlob
+			leaseId = acquireLeaseForRegistryBlob
 
 			picked_blobs = Set.new
 			candidate_blobs.each {|candidate_blob|
@@ -314,14 +314,14 @@ class LogStash::Inputs::LogstashInputAzureblob < LogStash::Inputs::Base
 				gen = registryItem.gen
 			end
 
-			saveRegistry(registry, lease)
+			saveRegistry(registry, leaseId)
 
 			return picked_blob, start_index, gen
 		rescue StandardError=> exc
 			logError(exc)
 			return nil, nil, nil
 		ensure
-			releaseLeaseForRegistryBlob(lease) if lease
+			releaseLeaseForRegistryBlob(leaseId) if leaseId
 		end
 	end
 
@@ -393,8 +393,8 @@ class LogStash::Inputs::LogstashInputAzureblob < LogStash::Inputs::Base
 	def loadRegistry
 		@registryBlobPersister.load
 	end
-	def saveRegistry(registry, lease_id)
-		@registryBlobPersister.save(registry, lease_id)
+	def saveRegistry(registry, leaseId)
+		@registryBlobPersister.save(registry, leaseId)
 	end
 	def updateRegistryWithItem(registryItem)
 		begin
