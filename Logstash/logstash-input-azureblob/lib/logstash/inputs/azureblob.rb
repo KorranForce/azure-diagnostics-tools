@@ -301,7 +301,7 @@ class LogStash::Inputs::LogstashInputAzureblob < LogStash::Inputs::Base
 			}
 			candidate_blobs = nil #gc
 
-			picked_blob = picked_blobs.min_by {|b| registry[b.name].gen}
+			picked_blob = picked_blobs.max_by {|b| registry[b.name].gen}
 			picked_blobs = nil #gc
 			start_index = 0
 			gen = 0
@@ -356,11 +356,10 @@ class LogStash::Inputs::LogstashInputAzureblob < LogStash::Inputs::Base
 			target_item.gen = 0
 		end
 
-		while registry.items.min_by {|x| x.gen}.gen > 0
-			registry.items.each {|item| 
-				item.gen -= 1
-			}
-		end
+		minGen = registry.items.min_by {|x| x.gen}.gen
+		registry.items.each {|item| 
+			item.gen -= minGen
+		}
 	end
 
 	def unregisterReader
