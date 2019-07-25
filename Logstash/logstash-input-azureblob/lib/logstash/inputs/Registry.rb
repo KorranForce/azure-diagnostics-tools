@@ -10,7 +10,7 @@ class LogStash::Inputs::Registry
 	end
 	attr_reader :itemClass, :content
 	extend Forwardable
-	def_delegators :content, :[], :[]=, :each, :values, :to_json
+	def_delegators :content, :[], :each, :values, :to_json
 
 	def contentFromJson(json)
 		@content = {}
@@ -18,5 +18,8 @@ class LogStash::Inputs::Registry
 			@content[key] = itemClass.fromHash(value)
 		}
 		self
+	end
+	def add(item)
+		content[item.file_path] = item
 	end
 end

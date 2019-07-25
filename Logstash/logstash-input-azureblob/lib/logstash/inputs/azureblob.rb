@@ -13,6 +13,7 @@ require "com/microsoft/json-parser"
 require "#{__dir__}/BlobReader.rb"
 require "#{__dir__}/RegistryItem.rb"
 require "#{__dir__}/Registry.rb"
+require "#{__dir__}/RegistryBlobPersister.rb"
 
 # Logstash input plugin for Azure Blobs
 #
@@ -105,7 +106,7 @@ class LogStash::Inputs::LogstashInputAzureblob < LogStash::Inputs::Base
 	config :azure_blob_file_path_field_name, validate: :string, default: "azureblobfilepath"
 
 	# Constant of max integer
-	MAX = 2**([42].pack('i').size * 16 - 2) - 1
+	MAX_INTEGER = 2**([42].pack('i').size * 16 - 2) - 1
 
 	# Update the registry offset each time after this number of entries have been processed
 	UPDATE_REGISTRY_COUNT = 100
@@ -126,6 +127,12 @@ class LogStash::Inputs::LogstashInputAzureblob < LogStash::Inputs::Base
 			user_agent_prefix: user_agent)
 		# Add retry filter to the service object
 		@azure_blob.with_filter(Azure::Storage::Common::Core::Filter::ExponentialRetryPolicyFilter.new)
+
+		@registryBlobPersister = RegistryBlobPersister.new(
+			leaseDuration: registry_lease_duration,
+			azureBlob: @azure_blob,
+			container: container,
+			registryPath: registry_path)
 	end
 
 	def run(queue)
@@ -138,7 +145,7 @@ class LogStash::Inputs::LogstashInputAzureblob < LogStash::Inputs::Base
 	end
 
 	def stop
-		cleanup_registry
+		uregisterReader
 	end
 
 	# Start processing the next item.
@@ -262,8 +269,8 @@ class LogStash::Inputs::LogstashInputAzureblob < LogStash::Inputs::Base
 		new_offset = start_index
 		new_offset += content_length unless content_length.nil?
 		@logger.debug("New registry offset: #{new_offset}")
-		new_registry_item = LogStash::Inputs::RegistryItem.new(blob_name, new_etag, nil, new_offset, gen)
-		update_registry(new_registry_item)
+		registryItem = LogStash::Inputs::RegistryItem.new(blob_name, new_etag, nil, new_offset, gen)
+		update_registry(registryItem)
 	end
 
 	# Return the next blob for reading as well as the start index.
@@ -276,11 +283,11 @@ class LogStash::Inputs::LogstashInputAzureblob < LogStash::Inputs::Base
 			filtered_blobs = nil #gc
 
 			if registryBlob
-				registry = load_registry
-				lease = acquire_lease(registry_path)
+				registry = loadRegistry
+				lease = acquireLeaseForRegistryBlob
 			else
 				registry = create_registry(candidate_blobs)
-				lease = acquire_lease(registry_path)
+				lease = acquireLeaseForRegistryBlob
 			end
 
 			picked_blobs = Set.new
@@ -288,15 +295,15 @@ class LogStash::Inputs::LogstashInputAzureblob < LogStash::Inputs::Base
 			picked_blob = nil
 			candidate_blobs.each {|candidate_blob|
 				@logger.debug("candidate_blob: #{candidate_blob.name} content length: #{candidate_blob.properties[:content_length]}")
-				registry_item = registry[candidate_blob.name]
-
-				# Appending items that doesn't exist in the hash table
-				unless registry_item
-					registry_item = LogStash::Inputs::RegistryItem.new(candidate_blob.name, candidate_blob.properties[:etag], nil, 0, 0)
-					registry[candidate_blob.name] = registry_item
+				registryItem = registry[candidate_blob.name]
+				# Appending items that doesn't exist in the registry
+				unless registryItem
+					registryItem = LogStash::Inputs::RegistryItem.new(candidate_blob.name, candidate_blob.properties[:etag], nil, 0, 0)
+					registry.add(registryItem)
 				end
-				@logger.debug("registry_item offset: #{registry_item.offset}")
-				if registry_item.offset < candidate_blob.properties[:content_length] && (registry_item.reader.nil? || registry_item.reader == @reader)
+
+				@logger.debug("registryItem offset: #{registryItem.offset}")
+				if registryItem.offset < candidate_blob.properties[:content_length] && (registryItem.reader.nil? || registryItem.reader == @reader)
 					@logger.debug("candidate_blob picked: #{candidate_blob.name} content length: #{candidate_blob.properties[:content_length]}")
 					picked_blobs << candidate_blob
 				end
@@ -309,25 +316,24 @@ class LogStash::Inputs::LogstashInputAzureblob < LogStash::Inputs::Base
 			start_index = 0
 			gen = 0
 			if picked_blob
-				registry_item = registry[picked_blob.name]
-				registry_item.reader = @reader
-				start_index = registry_item.offset
+				registryItem = registry[picked_blob.name]
+				registryItem.reader = @reader
+				start_index = registryItem.offset
 				raise_gen(registry, picked_blob.name)
-				gen = registry_item.gen
+				gen = registryItem.gen
 			end
 
 			# Save the change for the registry
-			save_registry(registry, lease)
+			saveRegistry(registry, lease)
 
-			@azure_blob.release_blob_lease(container, registry_path, lease)
-			lease = nil
+			releaseLeaseForRegistryBlob(lease)
 
 			return picked_blob, start_index, gen
 		rescue StandardError=> exc
 			log_error(exc)
 			return nil, nil, nil
 		ensure
-			@azure_blob.release_blob_lease(container, registry_path, lease) if lease
+			releaseLeaseForRegistryBlob(lease) if lease
 		end
 	end
 
@@ -338,7 +344,7 @@ class LogStash::Inputs::LogstashInputAzureblob < LogStash::Inputs::Base
 			begin
 				target_item.gen += 1
 				# Protect gen from overflow.
-				target_item.gen = target_item.gen / 2 if target_item.gen == MAX
+				target_item.gen = target_item.gen / 2 if target_item.gen == MAX_INTEGER
 			rescue StandardError=> exc
 				@logger.error("Fail to get the next generation for target item #{target_item}.", exception: exc)
 				target_item.gen = 0
@@ -354,98 +360,70 @@ class LogStash::Inputs::LogstashInputAzureblob < LogStash::Inputs::Base
 		end
 	end
 
-	def update_registry(registry_item)
+	def update_registry(registryItem)
+		lease = nil
 		begin
-			lease = nil
-			lease = acquire_lease(registry_path)
-			registry = load_registry
-			registry[registry_item.file_path] = registry_item
-			save_registry(registry, lease)
-			@azure_blob.release_blob_lease(container, registry_path, lease)
-			lease = nil
+			lease = acquireLeaseForRegistryBlob
+			registry = loadRegistry
+			registry.add(registryItem)
+			saveRegistry(registry, lease)
+			releaseLeaseForRegistryBlob(lease)
 		rescue StandardError=> exc
 			log_error(exc)
 		ensure
-			@azure_blob.release_blob_lease(container, registry_path, lease) if lease
+			releaseLeaseForRegistryBlob(lease) if lease
 		end
 	end
 
-	def cleanup_registry
+	def uregisterReader
+		lease = nil
 		begin
-			@logger.debug("azureblob : start cleanup_registry")
-			lease = nil
-			lease = acquire_lease(registry_path)
-			registry = load_registry
+			@logger.debug("azureblob : start uregisterReader")
+			lease = acquireLeaseForRegistryBlob
+			registry = loadRegistry
 			registry.each {|key, item|
 				item.reader = nil if item.reader == @reader
 			}
-			save_registry(registry, lease)
-			@azure_blob.release_blob_lease(container, registry_path, lease)
-			lease = nil
+			saveRegistry(registry, lease)
+			releaseLeaseForRegistryBlob(lease)
 		rescue StandardError=> exc
 			log_error(exc)
 		ensure
-			@azure_blob.release_blob_lease(container, registry_path, lease) if lease
+			releaseLeaseForRegistryBlob(lease) if lease
 		end
-		@logger.debug("azureblob : End of cleanup_registry")
+		@logger.debug("azureblob : End of uregisterReader")
 	end
 
 	# Create a registry file to coordinate between multiple azure blob inputs.
-	def create_registry(blob_items)
+	def create_registry(blobs)
 		@azure_blob.create_block_blob(container, registry_path, '')
-		lease = acquire_lease(registry_path)
+		lease = acquireLeaseForRegistryBlob
 		registry = LogStash::Inputs::Registry.new
 		if registry_create_policy == 'resume'
 			initialOffsetGetter = ->(blob){blob.properties[:content_length]}
 		else
 			initialOffsetGetter = ->(blob){0}
 		end
-		blob_items.each {|blob_item|
-			registry[blob_item.name] = LogStash::Inputs::RegistryItem.new(blob_item.name, blob_item.properties[:etag], nil, initialOffsetGetter.call(blob_item), 0)
+		blobs.each {|blob|
+			registry.add(LogStash::Inputs::RegistryItem.new(
+				blob.name, blob.properties[:etag], nil, initialOffsetGetter.call(blob), 0))
 		}
-		save_registry(registry, lease)
-		@azure_blob.release_blob_lease(container, registry_path, lease)
+		saveRegistry(registry, lease)
+		releaseLeaseForRegistryBlob(lease)
 		registry
 	end
 
-	# Load the content of the registry into the registry hash and return it.
-	def load_registry
-		# Get content
-		_registry_blob, registry_blob_body = @azure_blob.get_blob(container, registry_path)
-		LogStash::Inputs::Registry.new.contentFromJson(registry_blob_body)
+	def loadRegistry
+		@registryBlobPersister.load
 	end
-
-	# Serialize the registry hash and save it.
-	def save_registry(registry, lease_id)
-		registry_json = registry.to_json
-
-		@azure_blob.create_block_blob(container, registry_path, registry_json, lease_id: lease_id)
+	def saveRegistry(registry, lease_id)
+		@registryBlobPersister.save(registry, lease_id)
 	end
-
-	# Acquire a lease on a blob item with retries.
-	#
-	# By default, it will retry 60 times with 1 second interval.
-	def acquire_lease(blob_name, retry_times = 60, interval_sec = 1)
-		lease = nil;
-		retried = 0;
-		while lease.nil?
-			begin
-				lease = @azure_blob.acquire_blob_lease(container, blob_name, {timeout: 60, duration: registry_lease_duration})
-			rescue StandardError=> exc
-				if exc.class.name.include?('LeaseAlreadyPresent')
-					if retried > retry_times
-						raise
-					end
-					retried += 1
-					sleep interval_sec
-				else
-					# Anything else happend other than 'LeaseAlreadyPresent', break the lease. This is a work-around for the behavior that when
-					# timeout exception is hit, somehow, a infinite lease will be put on the lock file.
-					@azure_blob.break_blob_lease(container, blob_name, {break_period: 30})
-				end
-			end
-		end
-		return lease
+	def acquireLeaseForRegistryBlob(retryTimes:60, intervalSec:1)
+		@registryBlobPersister.acquireLease(retryTimes: retryTimes, intervalSec: intervalSec)
+	end
+	def releaseLeaseForRegistryBlob(leaseId)
+		@registryBlobPersister.releaseLease(leaseId)
 	end
 
 	def log_error(exc)
