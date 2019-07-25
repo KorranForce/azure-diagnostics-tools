@@ -161,11 +161,10 @@ class LogStash::Inputs::LogstashInputAzureblob < LogStash::Inputs::Base
 					@logger.debug("Processing blob #{blob_name}")
 					blob_size = blob.properties[:content_length]
 					# Work-around: After returned by get_blob, the etag will contain quotes.
-					new_etag = blob.properties[:etag]
+					etag = blob.properties[:etag]
 					# ~ Work-around
-					blob, header = @azure_blob.get_blob(container, blob_name, {end_range: file_head_bytes - 1}) if file_head_bytes && file_head_bytes > 0
-					blob, tail = @azure_blob.get_blob(container, blob_name, {start_range: blob_size - file_tail_bytes}) if file_tail_bytes && file_tail_bytes > 0
 					blob = nil #gc
+					header, tail = getHeaderAndTailOfBlob(blob_name, blob_size)
 
 					# Skip the header since it is already read.
 					start_index = file_head_bytes if start_index == 0
@@ -185,13 +184,13 @@ class LogStash::Inputs::LogstashInputAzureblob < LogStash::Inputs::Base
 
 								enqueue_content(queue, json_content, header, tail, blob_name)
 
-								on_entry_processed(start_index, content_length, blob_name, new_etag, gen)
+								on_entry_processed(start_index, content_length, blob_name, etag, gen)
 							},
 							->(malformed_json) {
 								@logger.debug("Skipping #{malformed_json.length} malformed bytes")
 								content_length = content_length + malformed_json.length
 
-								on_entry_processed(start_index, content_length, blob_name, new_etag, gen)
+								on_entry_processed(start_index, content_length, blob_name, etag, gen)
 							})
 					else
 						begin
@@ -200,17 +199,23 @@ class LogStash::Inputs::LogstashInputAzureblob < LogStash::Inputs::Base
 							content_length += content.length
 							enqueue_content(queue, content, header, tail, blob_name)
 
-							on_entry_processed(start_index, content_length, blob_name, new_etag, gen)
+							on_entry_processed(start_index, content_length, blob_name, etag, gen)
 						end while are_more_bytes_available && content
 					end
 				ensure
 					# Making sure the reader is removed from the registry even when there's exception.
-					updateRegistryWithItemData(start_index, content_length, blob_name, new_etag, gen)
+					updateRegistryWithItemData(start_index, content_length, blob_name, etag, gen)
 				end
 			end
 		rescue => exc
 			logError(exc)
 		end
+	end
+
+	def getHeaderAndTailOfBlob(name, size)
+		blob, header = @azure_blob.get_blob(container, name, {end_range: file_head_bytes - 1}) if file_head_bytes && file_head_bytes > 0
+		blob, tail = @azure_blob.get_blob(container, name, {start_range: size - file_tail_bytes}) if file_tail_bytes && file_tail_bytes > 0
+		return header, tail
 	end
 
 	def enqueue_content(queue, content, header, tail, blob_name)
@@ -233,9 +238,9 @@ class LogStash::Inputs::LogstashInputAzureblob < LogStash::Inputs::Base
 		}
 	end
 
-	def on_entry_processed(start_index, content_length, blob_name, new_etag, gen)
+	def on_entry_processed(start_index, content_length, blob_name, etag, gen)
 		@processed_entries += 1
-		updateRegistryWithItemData(start_index, content_length, blob_name, new_etag, gen) if @processed_entries % UPDATE_REGISTRY_COUNT == 0
+		updateRegistryWithItemData(start_index, content_length, blob_name, etag, gen) if @processed_entries % UPDATE_REGISTRY_COUNT == 0
 	end
 
 	# List all the blobs in the given container.
@@ -266,10 +271,10 @@ class LogStash::Inputs::LogstashInputAzureblob < LogStash::Inputs::Base
 		return blobs
 	end
 
-	def updateRegistryWithItemData(start_index, content_length, blob_name, new_etag, gen)
+	def updateRegistryWithItemData(start_index, content_length, blob_name, etag, gen)
 		offset = (start_index || 0) + (content_length || 0)
 		@logger.debug("New registry offset: #{offset}")
-		registryItem = @registryItemClass.new(blob_name, new_etag, nil, offset, gen)
+		registryItem = @registryItemClass.new(blob_name, etag, nil, offset, gen)
 		updateRegistryWithItem(registryItem)
 	end
 
