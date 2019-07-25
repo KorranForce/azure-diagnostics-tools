@@ -304,8 +304,8 @@ class LogStash::Inputs::LogstashInputAzureblob < LogStash::Inputs::Base
 
 			picked_blobs = Set.new
 			candidate_blobs.each {|candidate_blob|
-				@logger.debug("candidate_blob: #{candidate_blob.name} content length: #{candidate_blob.properties[:content_length]}")
 				registryItem = registry[candidate_blob.name]
+				@logger.debug("candidate_blob: #{candidate_blob.name} content length: #{candidate_blob.properties[:content_length]}")
 				@logger.debug("registryItem offset: #{registryItem.offset}")
 				if registryItem.offset < candidate_blob.properties[:content_length] && (registryItem.reader.nil? || registryItem.reader == @reader)
 					@logger.debug("candidate_blob picked: #{candidate_blob.name} content length: #{candidate_blob.properties[:content_length]}")
