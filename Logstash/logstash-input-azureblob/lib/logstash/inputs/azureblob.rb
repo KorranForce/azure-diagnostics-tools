@@ -325,10 +325,10 @@ class LogStash::Inputs::LogstashInputAzureblob < LogStash::Inputs::Base
 	end
 
 	def findRegistryBlob(blobs)
-		blobs.find {|item| item.name.downcase == registry_path}
+		blobs.find {|blob| blob.name.downcase == registry_path}
 	end
 	def selectCandidateBlobs(blobs)
-		blobs.select {|item| item.name.downcase != registry_path}
+		blobs.select {|blob| blob.name.downcase != registry_path}
 	end
 
 	def actualizeRegistry(registry, existingBlobs)
