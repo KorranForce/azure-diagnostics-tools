@@ -301,6 +301,7 @@ class LogStash::Inputs::LogstashInputAzureblob < LogStash::Inputs::Base
 			}
 			candidate_blobs = nil #gc
 
+			#MAX_INTEGER / 1*60*60 (1 hour log rotation for app service) - reads per second we need to reach MAX_INTEGER value for generation with max_by
 			picked_blob = picked_blobs.max_by {|b| registry[b.name].gen}
 			picked_blobs = nil #gc
 			start_index = 0
