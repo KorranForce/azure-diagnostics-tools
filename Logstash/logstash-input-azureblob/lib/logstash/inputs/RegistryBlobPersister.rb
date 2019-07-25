@@ -7,14 +7,15 @@ class RegistryBlobPersister
 		@container = opts[:container] || raise("container must be specified")
 		@leaseDuration = opts[:leaseDuration] || raise("leaseDuration must be specified")
 		@registryPath = opts[:registryPath] || raise("registryPath must be specified")
+		@leaseId = nil
 	end
-	attr_reader :registryClass, :azureBlob, :container, :registryPath, :leaseDuration
+	attr_reader :registryClass, :azureBlob, :container, :registryPath, :leaseDuration, :leaseId
 
 	def load
 		_blob, blobBody = azureBlob.get_blob(container, registryPath)
 		registryClass.new.contentFromJson(blobBody)
 	end
-	def save(registry, leaseId=nil)
+	def save(registry)
 		azureBlob.create_block_blob(container, registryPath, registry.to_json, lease_id: leaseId)
 	end
 	def create
@@ -24,35 +25,35 @@ class RegistryBlobPersister
 	end
 
 	def update(registryItem)
-		leaseId = nil
-		begin
-			leaseId = acquireLease
+		leasing {
 			registry = load
 			registry.add(registryItem)
-			save(registry, leaseId)
-		ensure
-			releaseLease(leaseId) if leaseId
-		end
+			save(registry)
+		}
 	end
 
 	def unregisterReader(reader)
-		leaseId = nil
-		begin
-			leaseId = acquireLease
+		leasing {
 			registry = load
 			registry.unregisterReader(reader)
-			save(registry, leaseId)
-		ensure
-			releaseLease(leaseId) if leaseId
-		end
+			save(registry)
+		}
 	end
 
+	def leasing(retryTimes:60, intervalSec:1, &block)
+		acquireLease(retryTimes: retryTimes, intervalSec: intervalSec)
+		begin
+			block.call
+		ensure
+			releaseLease
+		end
+	end
 	def acquireLease(retryTimes:60, intervalSec:1)
-		leaseId = nil;
+		@leaseId = nil;
 		retried = 0;
-		while leaseId.nil?
+		until leaseId
 			begin
-				leaseId = azureBlob.acquire_blob_lease(container, registryPath, {timeout: 60, duration: leaseDuration})
+				@leaseId = azureBlob.acquire_blob_lease(container, registryPath, {timeout: 60, duration: leaseDuration})
 			rescue StandardError=> exc
 				if exc.class.name.include?('LeaseAlreadyPresent')
 					if retried > retryTimes
@@ -67,9 +68,8 @@ class RegistryBlobPersister
 				end
 			end
 		end
-		return leaseId
 	end
-	def releaseLease(leaseId)
-		azureBlob.release_blob_lease(container, registryPath, leaseId)
+	def releaseLease
+		@leaseId = azureBlob.release_blob_lease(container, registryPath, leaseId)
 	end
 end

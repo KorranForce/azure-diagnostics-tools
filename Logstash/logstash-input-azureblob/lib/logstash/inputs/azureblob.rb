@@ -287,41 +287,38 @@ class LogStash::Inputs::LogstashInputAzureblob < LogStash::Inputs::Base
 			else
 				registry = create_registry(candidate_blobs)
 			end
-			leaseId = acquireLeaseForRegistryBlob
+			leasingRegistryBlob {
+				picked_blobs = Set.new
+				candidate_blobs.each {|candidate_blob|
+					registryItem = registry[candidate_blob.name]
+					@logger.debug("candidate_blob: #{candidate_blob.name} content length: #{candidate_blob.properties[:content_length]}")
+					@logger.debug("registryItem offset: #{registryItem.offset}")
+					if registryItem.offset < candidate_blob.properties[:content_length] && (registryItem.reader.nil? || registryItem.reader == @reader)
+						@logger.debug("candidate_blob picked: #{candidate_blob.name} content length: #{candidate_blob.properties[:content_length]}")
+						picked_blobs << candidate_blob
+					end
+				}
+				candidate_blobs = nil #gc
 
-			picked_blobs = Set.new
-			candidate_blobs.each {|candidate_blob|
-				registryItem = registry[candidate_blob.name]
-				@logger.debug("candidate_blob: #{candidate_blob.name} content length: #{candidate_blob.properties[:content_length]}")
-				@logger.debug("registryItem offset: #{registryItem.offset}")
-				if registryItem.offset < candidate_blob.properties[:content_length] && (registryItem.reader.nil? || registryItem.reader == @reader)
-					@logger.debug("candidate_blob picked: #{candidate_blob.name} content length: #{candidate_blob.properties[:content_length]}")
-					picked_blobs << candidate_blob
+				#MAX_INTEGER / 1*60*60 (1 hour log rotation for app service) - reads per second we need to reach MAX_INTEGER value for generation with max_by
+				picked_blob = picked_blobs.max_by {|b| registry[b.name].gen}
+				picked_blobs = nil #gc
+				start_index = 0
+				gen = 0
+				if picked_blob
+					registryItem = registry[picked_blob.name]
+					registryItem.reader = @reader
+					start_index = registryItem.offset
+					raise_gen(registry, registryItem)
+					gen = registryItem.gen
 				end
+
+				saveRegistry(registry)
 			}
-			candidate_blobs = nil #gc
-
-			#MAX_INTEGER / 1*60*60 (1 hour log rotation for app service) - reads per second we need to reach MAX_INTEGER value for generation with max_by
-			picked_blob = picked_blobs.max_by {|b| registry[b.name].gen}
-			picked_blobs = nil #gc
-			start_index = 0
-			gen = 0
-			if picked_blob
-				registryItem = registry[picked_blob.name]
-				registryItem.reader = @reader
-				start_index = registryItem.offset
-				raise_gen(registry, registryItem)
-				gen = registryItem.gen
-			end
-
-			saveRegistry(registry, leaseId)
-
 			return picked_blob, start_index, gen
 		rescue StandardError=> exc
 			logError(exc)
 			return nil, nil, nil
-		ensure
-			releaseLeaseForRegistryBlob(leaseId) if leaseId
 		end
 	end
 
@@ -375,26 +372,26 @@ class LogStash::Inputs::LogstashInputAzureblob < LogStash::Inputs::Base
 
 	# Create a registry file to coordinate between multiple azure blob inputs.
 	def create_registry(blobs)
-		registry = @registryBlobPersister.create
-		leaseId = acquireLeaseForRegistryBlob
 		if registry_create_policy == 'resume'
 			initialOffsetGetter = ->(blob){blob.properties[:content_length]}
 		else
 			initialOffsetGetter = ->(blob){0}
 		end
-		blobs.each {|blob|
-			registry.addByData(blob.name, blob.properties[:etag], nil, initialOffsetGetter.call(blob))
+		registry = @registryBlobPersister.create
+		leasingRegistryBlob {
+			blobs.each {|blob|
+				registry.addByData(blob.name, blob.properties[:etag], nil, initialOffsetGetter.call(blob))
+			}
+			saveRegistry(registry)
 		}
-		saveRegistry(registry, leaseId)
-		releaseLeaseForRegistryBlob(leaseId)
 		registry
 	end
 
 	def loadRegistry
 		@registryBlobPersister.load
 	end
-	def saveRegistry(registry, leaseId)
-		@registryBlobPersister.save(registry, leaseId)
+	def saveRegistry(registry)
+		@registryBlobPersister.save(registry)
 	end
 	def updateRegistryWithItem(registryItem)
 		begin
@@ -403,11 +400,8 @@ class LogStash::Inputs::LogstashInputAzureblob < LogStash::Inputs::Base
 			logError(exc)
 		end
 	end
-	def acquireLeaseForRegistryBlob(retryTimes:60, intervalSec:1)
-		@registryBlobPersister.acquireLease(retryTimes: retryTimes, intervalSec: intervalSec)
-	end
-	def releaseLeaseForRegistryBlob(leaseId)
-		@registryBlobPersister.releaseLease(leaseId)
+	def leasingRegistryBlob(retryTimes:60, intervalSec:1, &block)
+		@registryBlobPersister.leasing(retryTimes: retryTimes, intervalSec: intervalSec, &block)
 	end
 
 	def logError(exc)
