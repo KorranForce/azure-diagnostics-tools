@@ -12,17 +12,19 @@ describe LogStash::Inputs::LogstashInputAzureblob do
         @logger.level = :debug
 
         @azure_blob_sdk = double
+        @registryBlobPersister = double
         @json_codec = double("LogStash::Codecs::JSON", :is_a? => true)
         @other_codec = double("other codec", :is_a? => false)
 
         @azureblob_input = LogStash::Inputs::LogstashInputAzureblob.new
         @azureblob_input.instance_variable_set(:@logger, @logger)
+        @azureblob_input.instance_variable_set(:@registryBlobPersister, @registryBlobPersister)
         @azureblob_input.instance_variable_set(:@file_head_bytes, 0)
         @azureblob_input.instance_variable_set(:@file_tail_bytes, 0)
         @azureblob_input.instance_variable_set(:@azure_blob, @azure_blob_sdk)
         @azureblob_input.instance_variable_set(:@container, double)
         @azureblob_input.instance_variable_set(:@codec, @other_codec)
-        allow(@azureblob_input).to receive(:update_registry)
+        allow(@azureblob_input).to receive(:updateRegistryWithItem)
     end
 
     def set_json_codec
@@ -153,7 +155,7 @@ describe LogStash::Inputs::LogstashInputAzureblob do
         allow(@azureblob_input).to receive(:register_for_read).and_return([blob, 0, nil])
         allow(@json_codec).to receive(:decode).and_return([])
 
-        expect(@azureblob_input).to receive(:update_registry) do |new_registry_item|
+        expect(@azureblob_input).to receive(:updateRegistryWithItem) do |new_registry_item|
             registry_file_path = new_registry_item.file_path
             registry_offset = new_registry_item.offset
         end
@@ -248,7 +250,7 @@ describe LogStash::Inputs::LogstashInputAzureblob do
         allow(@azureblob_input).to receive(:register_for_read).and_return([blob, 0, nil])
         allow(@other_codec).to receive(:decode).and_return([])
 
-        expect(@azureblob_input).to receive(:update_registry) do |new_registry_item|
+        expect(@azureblob_input).to receive(:updateRegistryWithItem) do |new_registry_item|
             registry_file_path = new_registry_item.file_path
             registry_offset = new_registry_item.offset
         end
@@ -285,7 +287,7 @@ describe LogStash::Inputs::LogstashInputAzureblob do
         allow(@other_codec).to receive(:decode).and_return([])
 
         update_registry_count = entries.length / update_count + 1
-        expect(@azureblob_input).to receive(:update_registry).exactly(update_registry_count).times
+        expect(@azureblob_input).to receive(:updateRegistryWithItem).exactly(update_registry_count).times
 
         @azureblob_input.process(nil)
     end
@@ -316,7 +318,7 @@ describe LogStash::Inputs::LogstashInputAzureblob do
         allow(@json_codec).to receive(:decode).and_return([])
 
         update_registry_count = entries.length / update_count + 1
-        expect(@azureblob_input).to receive(:update_registry).exactly(update_registry_count).times
+        expect(@azureblob_input).to receive(:updateRegistryWithItem).exactly(update_registry_count).times
 
         @azureblob_input.process(nil)
     end

@@ -208,7 +208,7 @@ class LogStash::Inputs::LogstashInputAzureblob < LogStash::Inputs::Base
 				end
 			end
 		rescue => exc
-			log_error(exc)
+			logError(exc)
 		end
 	end
 
@@ -224,8 +224,8 @@ class LogStash::Inputs::LogstashInputAzureblob < LogStash::Inputs::Base
 		end
 
 		codec.decode(full_content) {|event|
-			if @azure_blob_file_path_field
-				event.set(@azure_blob_file_path_field_name, blob_name)
+			if azure_blob_file_path_field
+				event.set(azure_blob_file_path_field_name, blob_name)
 			end
 			decorate(event)
 			queue << event
@@ -270,16 +270,15 @@ class LogStash::Inputs::LogstashInputAzureblob < LogStash::Inputs::Base
 		new_offset += content_length unless content_length.nil?
 		@logger.debug("New registry offset: #{new_offset}")
 		registryItem = LogStash::Inputs::RegistryItem.new(blob_name, new_etag, nil, new_offset, gen)
-		update_registry(registryItem)
+		updateRegistryWithItem(registryItem)
 	end
 
 	# Return the next blob for reading as well as the start index.
 	def register_for_read
 		begin
 			filtered_blobs = list_filtered_blobs
-			registryBlob = filtered_blobs.find {|item| item.name.downcase == registry_path}
-			
-			candidate_blobs = filtered_blobs.select {|item| item.name.downcase != registry_path}
+			registryBlob = findRegistryBlob(filtered_blobs)
+			candidate_blobs = selectCandidateBlobs(filtered_blobs)
 			filtered_blobs = nil #gc
 
 			if registryBlob
@@ -323,18 +322,22 @@ class LogStash::Inputs::LogstashInputAzureblob < LogStash::Inputs::Base
 				gen = registryItem.gen
 			end
 
-			# Save the change for the registry
 			saveRegistry(registry, lease)
-
-			releaseLeaseForRegistryBlob(lease)
 
 			return picked_blob, start_index, gen
 		rescue StandardError=> exc
-			log_error(exc)
+			logError(exc)
 			return nil, nil, nil
 		ensure
 			releaseLeaseForRegistryBlob(lease) if lease
 		end
+	end
+
+	def findRegistryBlob(blobs)
+		blobs.find {|item| item.name.downcase == registry_path}
+	end
+	def selectCandidateBlobs(blobs)
+		blobs.select {|item| item.name.downcase != registry_path}
 	end
 
 	# Raise generation for blob in registry
@@ -346,7 +349,8 @@ class LogStash::Inputs::LogstashInputAzureblob < LogStash::Inputs::Base
 				# Protect gen from overflow.
 				target_item.gen = target_item.gen / 2 if target_item.gen == MAX_INTEGER
 			rescue StandardError=> exc
-				@logger.error("Fail to get the next generation for target item #{target_item}.", exception: exc)
+				@logger.error("Fail to get the next generation for target item #{target_item}.")
+				logError(exc)
 				target_item.gen = 0
 			end
 
@@ -360,21 +364,6 @@ class LogStash::Inputs::LogstashInputAzureblob < LogStash::Inputs::Base
 		end
 	end
 
-	def update_registry(registryItem)
-		lease = nil
-		begin
-			lease = acquireLeaseForRegistryBlob
-			registry = loadRegistry
-			registry.add(registryItem)
-			saveRegistry(registry, lease)
-			releaseLeaseForRegistryBlob(lease)
-		rescue StandardError=> exc
-			log_error(exc)
-		ensure
-			releaseLeaseForRegistryBlob(lease) if lease
-		end
-	end
-
 	def uregisterReader
 		lease = nil
 		begin
@@ -385,9 +374,8 @@ class LogStash::Inputs::LogstashInputAzureblob < LogStash::Inputs::Base
 				item.reader = nil if item.reader == @reader
 			}
 			saveRegistry(registry, lease)
-			releaseLeaseForRegistryBlob(lease)
 		rescue StandardError=> exc
-			log_error(exc)
+			logError(exc)
 		ensure
 			releaseLeaseForRegistryBlob(lease) if lease
 		end
@@ -419,6 +407,13 @@ class LogStash::Inputs::LogstashInputAzureblob < LogStash::Inputs::Base
 	def saveRegistry(registry, lease_id)
 		@registryBlobPersister.save(registry, lease_id)
 	end
+	def updateRegistryWithItem(registryItem)
+		begin
+			@registryBlobPersister.update(registryItem)
+		rescue StandardError=> exc
+			logError(exc)
+		end
+	end
 	def acquireLeaseForRegistryBlob(retryTimes:60, intervalSec:1)
 		@registryBlobPersister.acquireLease(retryTimes: retryTimes, intervalSec: intervalSec)
 	end
@@ -426,7 +421,7 @@ class LogStash::Inputs::LogstashInputAzureblob < LogStash::Inputs::Base
 		@registryBlobPersister.releaseLease(leaseId)
 	end
 
-	def log_error(exc)
-		@logger.error("Oh My, An error occurred. #{exc}:\n#{exc.backtrace}", exception: exc)
+	def logError(exc)
+		@logger.error(exc)
 	end
 end

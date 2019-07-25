@@ -15,7 +15,7 @@ class LogStash::Inputs::Registry
 	def contentFromJson(json)
 		@content = {}
 		JSON.parse(json).each {|key, value|
-			@content[key] = itemClass.fromHash(value)
+			add(itemClass.fromHash(value))
 		}
 		self
 	end

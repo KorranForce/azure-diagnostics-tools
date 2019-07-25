@@ -17,6 +17,17 @@ class LogStash::Inputs::RegistryBlobPersister
 	def save(registry, leaseId)
 		azureBlob.create_block_blob(container, registryPath, registry.to_json, lease_id: leaseId)
 	end
+	def update(registryItem)
+		leaseId = nil
+		begin
+			leaseId = acquireLease
+			registry = load
+			registry.add(registryItem)
+			save(registry, leaseId)
+		ensure
+			releaseLease(leaseId) if leaseId
+		end
+	end
 
 	def acquireLease(retryTimes:60, intervalSec:1)
 		leaseId = nil;
