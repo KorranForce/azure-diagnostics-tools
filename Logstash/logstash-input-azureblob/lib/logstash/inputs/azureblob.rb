@@ -273,19 +273,6 @@ class LogStash::Inputs::LogstashInputAzureblob < LogStash::Inputs::Base
 		updateRegistryWithItem(registryItem)
 	end
 
-	def actualizeRegistry(registry, existingBlobs)
-		existingBlobsNames = existingBlobs.map {|blob| blob.name}
-		registry.removeMany(registry.names - existingBlobsNames)
-
-		unregisteredBlobsNames = existingBlobsNames - registry.names
-		existingBlobsNames = nil #gc
-		existingBlobs.select {|blob|
-			unregisteredBlobsNames.include?(blob.name)
-		}.each {|unregisteredBlob|
-			registry.addByData(unregisteredBlob.name, unregisteredBlob.properties[:etag], nil, 0, 0)
-		}
-	end
-
 	# Return the next blob for reading as well as the start index.
 	def register_for_read
 		begin
@@ -318,12 +305,11 @@ class LogStash::Inputs::LogstashInputAzureblob < LogStash::Inputs::Base
 			picked_blobs = nil #gc
 			start_index = 0
 			gen = 0
-
 			if picked_blob
 				registryItem = registry[picked_blob.name]
 				registryItem.reader = @reader
 				start_index = registryItem.offset
-				raise_gen(registry, picked_blob.name)
+				raise_gen(registry, registryItem)
 				gen = registryItem.gen
 			end
 
@@ -345,27 +331,35 @@ class LogStash::Inputs::LogstashInputAzureblob < LogStash::Inputs::Base
 		blobs.select {|item| item.name.downcase != registry_path}
 	end
 
-	# Raise generation for blob in registry
-	def raise_gen(registry, file_path)
-		begin
-			target_item = registry[file_path]
-			begin
-				target_item.gen += 1
-				# Protect gen from overflow.
-				target_item.gen = target_item.gen / 2 if target_item.gen == MAX_INTEGER
-			rescue StandardError=> exc
-				@logger.error("Fail to get the next generation for target item #{target_item}.")
-				logError(exc)
-				target_item.gen = 0
-			end
+	def actualizeRegistry(registry, existingBlobs)
+		existingBlobsNames = existingBlobs.map {|blob| blob.name}
+		registry.removeMany(registry.names - existingBlobsNames)
 
-			min_gen_item = registry.values.min_by {|x| x.gen}
-			while min_gen_item.gen > 0
-				registry.values.each {|value| 
-					value.gen -= 1
-				}
-				min_gen_item = registry.values.min_by {|x| x.gen}
-			end
+		unregisteredBlobsNames = existingBlobsNames - registry.names
+		existingBlobsNames = nil #gc
+		existingBlobs.select {|blob|
+			unregisteredBlobsNames.include?(blob.name)
+		}.each {|unregisteredBlob|
+			registry.addByData(unregisteredBlob.name, unregisteredBlob.properties[:etag], nil)
+		}
+	end
+
+	# Raise generation for blob in registry
+	def raise_gen(registry, target_item)
+		begin
+			target_item.gen += 1
+			# Protect gen from overflow.
+			target_item.gen = target_item.gen / 2 if target_item.gen == MAX_INTEGER
+		rescue StandardError=> exc
+			@logger.error("Fail to get the next generation for target item #{target_item}.")
+			logError(exc)
+			target_item.gen = 0
+		end
+
+		while registry.items.min_by {|x| x.gen}.gen > 0
+			registry.items.each {|item| 
+				item.gen -= 1
+			}
 		end
 	end
 
@@ -389,7 +383,7 @@ class LogStash::Inputs::LogstashInputAzureblob < LogStash::Inputs::Base
 			initialOffsetGetter = ->(blob){0}
 		end
 		blobs.each {|blob|
-			registry.addByData(blob.name, blob.properties[:etag], nil, initialOffsetGetter.call(blob), 0)
+			registry.addByData(blob.name, blob.properties[:etag], nil, initialOffsetGetter.call(blob))
 		}
 		saveRegistry(registry, leaseId)
 		releaseLeaseForRegistryBlob(leaseId)

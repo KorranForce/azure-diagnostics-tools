@@ -10,9 +10,12 @@ class Registry
 	end
 	attr_reader :itemClass, :content
 	extend Forwardable
-	def_delegators :content, :[], :each, :values, :to_json
+	def_delegators :content, :[], :each, :to_json
 	def names
 		content.keys
+	end
+	def items
+		content.values
 	end
 
 	def contentFromJson(json)
