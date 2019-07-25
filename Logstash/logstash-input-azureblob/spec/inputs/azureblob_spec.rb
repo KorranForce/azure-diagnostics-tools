@@ -59,7 +59,7 @@ describe LogStash::Inputs::LogstashInputAzureblob do
 
         blob = stub_blob(blob_name, json_str)
 
-        allow(@azureblob_input).to receive(:register_for_read).and_return([blob, 0, nil])
+        allow(@azureblob_input).to receive(:pickNextBlobForProcessing).and_return([blob, 0, nil])
 
         expect(@json_codec).to receive(:decode).with(json_str).ordered
         expect(@json_codec).to_not receive(:decode).ordered
@@ -76,7 +76,7 @@ describe LogStash::Inputs::LogstashInputAzureblob do
 
         blob = stub_blob(blob_name, json_str1 + json_str2 + json_str3)
 
-        allow(@azureblob_input).to receive(:register_for_read).and_return([blob, 0, nil])
+        allow(@azureblob_input).to receive(:pickNextBlobForProcessing).and_return([blob, 0, nil])
 
         expect(@json_codec).to receive(:decode).with(json_str1).once.ordered
         expect(@json_codec).to receive(:decode).with(json_str2).once.ordered
@@ -94,7 +94,7 @@ describe LogStash::Inputs::LogstashInputAzureblob do
 
         blob = stub_blob(blob_name, json_str1 + json_str2)
 
-        allow(@azureblob_input).to receive(:register_for_read).and_return([blob, json_str1.length, nil])
+        allow(@azureblob_input).to receive(:pickNextBlobForProcessing).and_return([blob, json_str1.length, nil])
 
         expect(@json_codec).to receive(:decode).with(json_str2).once.ordered
         expect(@json_codec).to_not receive(:decode).ordered
@@ -112,7 +112,7 @@ describe LogStash::Inputs::LogstashInputAzureblob do
         malformed_data.each do |malformed|
             blob = stub_blob(blob_name, json_str1 + malformed + json_str2)
 
-            allow(@azureblob_input).to receive(:register_for_read).and_return([blob, 0, nil])
+            allow(@azureblob_input).to receive(:pickNextBlobForProcessing).and_return([blob, 0, nil])
 
             expect(@json_codec).to receive(:decode).with(json_str1).once.ordered
             expect(@json_codec).to receive(:decode).with(json_str2).once.ordered
@@ -134,7 +134,7 @@ describe LogStash::Inputs::LogstashInputAzureblob do
 
         blob = stub_blob(blob_name, head + already_parsed + json_str1 + json_str2 + tail)
 
-        allow(@azureblob_input).to receive(:register_for_read).and_return([blob, (head + already_parsed).length, nil])
+        allow(@azureblob_input).to receive(:pickNextBlobForProcessing).and_return([blob, (head + already_parsed).length, nil])
 
         expect(@json_codec).to receive(:decode).with(head + json_str1 + tail).once.ordered
         expect(@json_codec).to receive(:decode).with(head + json_str2 + tail).once.ordered
@@ -153,7 +153,7 @@ describe LogStash::Inputs::LogstashInputAzureblob do
         registry_file_path = ""
         registry_offset = -1
 
-        allow(@azureblob_input).to receive(:register_for_read).and_return([blob, 0, nil])
+        allow(@azureblob_input).to receive(:pickNextBlobForProcessing).and_return([blob, 0, nil])
         allow(@json_codec).to receive(:decode).and_return([])
 
         expect(@azureblob_input).to receive(:updateRegistryWithItem) do |new_registry_item|
@@ -173,7 +173,7 @@ describe LogStash::Inputs::LogstashInputAzureblob do
 
         blob = stub_blob(blob_name, content)
 
-        allow(@azureblob_input).to receive(:register_for_read).and_return([blob, 0, nil])
+        allow(@azureblob_input).to receive(:pickNextBlobForProcessing).and_return([blob, 0, nil])
 
         expect(@other_codec).to receive(:decode).with(content).ordered
         expect(@other_codec).to_not receive(:decode).ordered
@@ -193,7 +193,7 @@ describe LogStash::Inputs::LogstashInputAzureblob do
 
         blob = stub_blob(blob_name, head + already_parsed + content + tail)
 
-        allow(@azureblob_input).to receive(:register_for_read).and_return([blob, (head + already_parsed).length, nil])
+        allow(@azureblob_input).to receive(:pickNextBlobForProcessing).and_return([blob, (head + already_parsed).length, nil])
 
         expect(@other_codec).to receive(:decode).with(head + content + tail).once.ordered
         expect(@other_codec).to_not receive(:decode).ordered
@@ -213,7 +213,7 @@ describe LogStash::Inputs::LogstashInputAzureblob do
         blob = stub_blob(blob_name, content) 
         @azureblob_input.instance_variable_set(:@file_chunk_size_bytes, chunk1.length)
 
-        allow(@azureblob_input).to receive(:register_for_read).and_return([blob, 0, nil])
+        allow(@azureblob_input).to receive(:pickNextBlobForProcessing).and_return([blob, 0, nil])
 
         expect(@other_codec).to receive(:decode).with(chunk1).once.ordered
         expect(@other_codec).to receive(:decode).with(chunk2).once.ordered
@@ -231,7 +231,7 @@ describe LogStash::Inputs::LogstashInputAzureblob do
 
         blob = stub_blob(blob_name,  already_parsed + actual_content)
 
-        allow(@azureblob_input).to receive(:register_for_read).and_return([blob, already_parsed.length, nil])
+        allow(@azureblob_input).to receive(:pickNextBlobForProcessing).and_return([blob, already_parsed.length, nil])
 
         expect(@other_codec).to receive(:decode).with(actual_content).ordered
         expect(@other_codec).to_not receive(:decode).ordered
@@ -248,7 +248,7 @@ describe LogStash::Inputs::LogstashInputAzureblob do
         registry_file_path = ""
         registry_offset = -1
 
-        allow(@azureblob_input).to receive(:register_for_read).and_return([blob, 0, nil])
+        allow(@azureblob_input).to receive(:pickNextBlobForProcessing).and_return([blob, 0, nil])
         allow(@other_codec).to receive(:decode).and_return([])
 
         expect(@azureblob_input).to receive(:updateRegistryWithItem) do |new_registry_item|
@@ -283,7 +283,7 @@ describe LogStash::Inputs::LogstashInputAzureblob do
 
         blob = stub_blob(blob_name, content)
 
-        allow(@azureblob_input).to receive(:register_for_read).and_return([blob, 0, nil])
+        allow(@azureblob_input).to receive(:pickNextBlobForProcessing).and_return([blob, 0, nil])
         @azureblob_input.instance_variable_set(:@file_chunk_size_bytes, chunk_size)
         allow(@other_codec).to receive(:decode).and_return([])
 
@@ -315,7 +315,7 @@ describe LogStash::Inputs::LogstashInputAzureblob do
 
         blob = stub_blob(blob_name, content)
 
-        allow(@azureblob_input).to receive(:register_for_read).and_return([blob, 0, nil])
+        allow(@azureblob_input).to receive(:pickNextBlobForProcessing).and_return([blob, 0, nil])
         allow(@json_codec).to receive(:decode).and_return([])
 
         update_registry_count = entries.length / update_count + 1

@@ -153,7 +153,7 @@ class LogStash::Inputs::LogstashInputAzureblob < LogStash::Inputs::Base
 	def process(queue)
 		begin
 			@processed_entries = 0
-			blob, start_index, gen = register_for_read
+			blob, start_index, gen = pickNextBlobForProcessing
 
 			if blob
 				begin
@@ -278,8 +278,7 @@ class LogStash::Inputs::LogstashInputAzureblob < LogStash::Inputs::Base
 		updateRegistryWithItem(registryItem)
 	end
 
-	# Return the next blob for reading as well as the start index.
-	def register_for_read
+	def pickNextBlobForProcessing #and many other things
 		begin
 			filtered_blobs = list_filtered_blobs
 			registryBlob = findRegistryBlob(filtered_blobs)
