@@ -128,6 +128,7 @@ class LogStash::Inputs::LogstashInputAzureblob < LogStash::Inputs::Base
 		# Add retry filter to the service object
 		@azure_blob.with_filter(Azure::Storage::Common::Core::Filter::ExponentialRetryPolicyFilter.new)
 
+		@registryItemClass = RegistryItem
 		@registryBlobPersister = RegistryBlobPersister.new(
 			leaseDuration: registry_lease_duration,
 			azureBlob: @azure_blob,
@@ -204,7 +205,7 @@ class LogStash::Inputs::LogstashInputAzureblob < LogStash::Inputs::Base
 					end
 				ensure
 					# Making sure the reader is removed from the registry even when there's exception.
-					request_registry_update(start_index, content_length, blob_name, new_etag, gen)
+					updateRegistryWithItemData(start_index, content_length, blob_name, new_etag, gen)
 				end
 			end
 		rescue => exc
@@ -234,7 +235,7 @@ class LogStash::Inputs::LogstashInputAzureblob < LogStash::Inputs::Base
 
 	def on_entry_processed(start_index, content_length, blob_name, new_etag, gen)
 		@processed_entries += 1
-		request_registry_update(start_index, content_length, blob_name, new_etag, gen) if @processed_entries % UPDATE_REGISTRY_COUNT == 0
+		updateRegistryWithItemData(start_index, content_length, blob_name, new_etag, gen) if @processed_entries % UPDATE_REGISTRY_COUNT == 0
 	end
 
 	# List all the blobs in the given container.
@@ -265,10 +266,10 @@ class LogStash::Inputs::LogstashInputAzureblob < LogStash::Inputs::Base
 		return blobs
 	end
 
-	def request_registry_update(start_index, content_length, blob_name, new_etag, gen)
+	def updateRegistryWithItemData(start_index, content_length, blob_name, new_etag, gen)
 		offset = (start_index || 0) + (content_length || 0)
 		@logger.debug("New registry offset: #{offset}")
-		registryItem = RegistryItem.new(blob_name, new_etag, nil, offset, gen)
+		registryItem = @registryItemClass.new(blob_name, new_etag, nil, offset, gen)
 		updateRegistryWithItem(registryItem)
 	end
 
@@ -289,7 +290,6 @@ class LogStash::Inputs::LogstashInputAzureblob < LogStash::Inputs::Base
 
 			picked_blobs = Set.new
 			# Pick up the next candidate
-			picked_blob = nil
 			candidate_blobs.each {|candidate_blob|
 				@logger.debug("candidate_blob: #{candidate_blob.name} content length: #{candidate_blob.properties[:content_length]}")
 				# Appending items that doesn't exist in the registry

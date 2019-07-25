@@ -18,6 +18,7 @@ describe LogStash::Inputs::LogstashInputAzureblob do
 
         @azureblob_input = LogStash::Inputs::LogstashInputAzureblob.new
         @azureblob_input.instance_variable_set(:@logger, @logger)
+        @azureblob_input.instance_variable_set(:@registryItemClass, RegistryItem)
         @azureblob_input.instance_variable_set(:@registryBlobPersister, @registryBlobPersister)
         @azureblob_input.instance_variable_set(:@file_head_bytes, 0)
         @azureblob_input.instance_variable_set(:@file_tail_bytes, 0)

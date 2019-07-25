@@ -34,6 +34,7 @@ class RegistryBlobPersister
 			releaseLease(leaseId) if leaseId
 		end
 	end
+
 	def unregisterReader(reader)
 		leaseId = nil
 		begin
