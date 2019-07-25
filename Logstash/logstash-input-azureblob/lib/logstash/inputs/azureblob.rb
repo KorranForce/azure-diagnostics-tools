@@ -244,7 +244,7 @@ class LogStash::Inputs::LogstashInputAzureblob < LogStash::Inputs::Base
 		@blob_list_page_size = 100 if blob_list_page_size <= 0
 
 		if path_filters.any?
-			merger = ->(blobs, entries){
+			merger = ->(blobs, entries) {
 				entries.each {|entry|
 					# FNM_PATHNAME is required so that "**/test" can match "test" at the root folder
 					# FNM_EXTGLOB allows you to use "test{a,b,c}" to match either "testa", "testb" or "testc" (closer to shell behavior)
@@ -252,7 +252,7 @@ class LogStash::Inputs::LogstashInputAzureblob < LogStash::Inputs::Base
 				}
 			}
 		else
-			merger = ->(blobs, entries){blobs.merge(entries)}
+			merger = ->(blobs, entries) {blobs.merge(entries)}
 		end
 
 		continuation_token = nil
@@ -373,9 +373,9 @@ class LogStash::Inputs::LogstashInputAzureblob < LogStash::Inputs::Base
 	# Create a registry file to coordinate between multiple azure blob inputs.
 	def create_registry(blobs)
 		if registry_create_policy == 'resume'
-			initialOffsetGetter = ->(blob){blob.properties[:content_length]}
+			initialOffsetGetter = ->(blob) {blob.properties[:content_length]}
 		else
-			initialOffsetGetter = ->(blob){0}
+			initialOffsetGetter = ->(blob) {0}
 		end
 		registry = @registryBlobPersister.create
 		leasingRegistryBlob {
