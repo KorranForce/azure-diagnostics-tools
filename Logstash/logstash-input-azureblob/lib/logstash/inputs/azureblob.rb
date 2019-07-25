@@ -273,6 +273,19 @@ class LogStash::Inputs::LogstashInputAzureblob < LogStash::Inputs::Base
 		updateRegistryWithItem(registryItem)
 	end
 
+	def actualizeRegistry(registry, existingBlobs)
+		existingBlobsNames = existingBlobs.map {|blob| blob.name}
+		registry.removeMany(registry.names - existingBlobsNames)
+
+		unregisteredBlobsNames = existingBlobsNames - registry.names
+		existingBlobsNames = nil #gc
+		existingBlobs.select {|blob|
+			unregisteredBlobsNames.include?(blob.name)
+		}.each {|unregisteredBlob|
+			registry.addByData(unregisteredBlob.name, unregisteredBlob.properties[:etag], nil, 0, 0)
+		}
+	end
+
 	# Return the next blob for reading as well as the start index.
 	def register_for_read
 		begin
@@ -283,17 +296,16 @@ class LogStash::Inputs::LogstashInputAzureblob < LogStash::Inputs::Base
 
 			if registryBlob
 				registry = loadRegistry
+				actualizeRegistry(registry, candidate_blobs)
 			else
 				registry = create_registry(candidate_blobs)
 			end
 			lease = acquireLeaseForRegistryBlob
 
 			picked_blobs = Set.new
-			# Pick up the next candidate
 			candidate_blobs.each {|candidate_blob|
 				@logger.debug("candidate_blob: #{candidate_blob.name} content length: #{candidate_blob.properties[:content_length]}")
-				# Appending items that doesn't exist in the registry
-				registryItem = registry[candidate_blob.name] || registry.addByData(candidate_blob.name, candidate_blob.properties[:etag], nil, 0, 0)
+				registryItem = registry[candidate_blob.name]
 
 				@logger.debug("registryItem offset: #{registryItem.offset}")
 				if registryItem.offset < candidate_blob.properties[:content_length] && (registryItem.reader.nil? || registryItem.reader == @reader)
@@ -305,9 +317,9 @@ class LogStash::Inputs::LogstashInputAzureblob < LogStash::Inputs::Base
 
 			picked_blob = picked_blobs.min_by {|b| registry[b.name].gen}
 			picked_blobs = nil #gc
-
 			start_index = 0
 			gen = 0
+
 			if picked_blob
 				registryItem = registry[picked_blob.name]
 				registryItem.reader = @reader

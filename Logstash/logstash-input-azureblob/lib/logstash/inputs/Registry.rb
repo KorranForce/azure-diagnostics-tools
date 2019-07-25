@@ -11,6 +11,9 @@ class Registry
 	attr_reader :itemClass, :content
 	extend Forwardable
 	def_delegators :content, :[], :each, :values, :to_json
+	def names
+		content.keys
+	end
 
 	def contentFromJson(json)
 		@content = {}
@@ -19,12 +22,23 @@ class Registry
 		}
 		self
 	end
+
 	def add(item)
 		content[item.file_path] = item
 	end
 	def addByData(*args)
 		add(itemClass.new(*args))
 	end
+
+	def remove(filePath)
+		content.delete(filePath)
+	end
+	def removeMany(filePaths)
+		filePaths.each {|filePath|
+			remove(filePath)
+		}
+	end
+
 	def unregisterReader(reader)
 		each {|key, item|
 			item.reader = nil if item.reader == reader
