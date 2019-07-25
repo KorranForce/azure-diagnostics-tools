@@ -114,7 +114,7 @@ class LogStash::Inputs::LogstashInputAzureblob < LogStash::Inputs::Base
 	def register
 		user_agent = "logstash-input-azureblob/#{Gem.latest_spec_for('logstash-input-azureblob').version}"
 
-		@path_filters << registry_path unless path_filters.include?(registry_path)
+		@path_filters << registry_path if path_filters.any? && !path_filters.include?(registry_path)
 
 		# this is the reader # for this specific instance.
 		@reader = SecureRandom.uuid
@@ -317,12 +317,12 @@ class LogStash::Inputs::LogstashInputAzureblob < LogStash::Inputs::Base
 				registry_item = registry[candidate_blob.name]
 
 				# Appending items that doesn't exist in the hash table
-				if registry_item.nil?
+				unless registry_item
 					registry_item = LogStash::Inputs::RegistryItem.new(candidate_blob.name, candidate_blob.properties[:etag], nil, 0, 0)
 					registry[candidate_blob.name] = registry_item
 				end
 				@logger.debug("registry_item offset: #{registry_item.offset}")
-				if ((registry_item.offset < candidate_blob.properties[:content_length]) && (registry_item.reader.nil? || registry_item.reader == @reader))
+				if registry_item.offset < candidate_blob.properties[:content_length] && (registry_item.reader.nil? || registry_item.reader == @reader)
 					@logger.debug("candidate_blob picked: #{candidate_blob.name} content length: #{candidate_blob.properties[:content_length]}")
 					picked_blobs << candidate_blob
 				end
