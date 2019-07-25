@@ -231,7 +231,7 @@ class LogStash::Inputs::LogstashInputAzureblob < LogStash::Inputs::Base
 	end
 
 	# List all the blobs in the given container.
-	def list_all_blobs
+	def list_filtered_blobs
 		blobs = Set.new
 		@blob_list_page_size = 100 if blob_list_page_size <= 0
 
@@ -258,32 +258,6 @@ class LogStash::Inputs::LogstashInputAzureblob < LogStash::Inputs::Base
 		return blobs
 	end
 
-	# Acquire a lease on a blob item with retries.
-	#
-	# By default, it will retry 60 times with 1 second interval.
-	def acquire_lease(blob_name, retry_times = 60, interval_sec = 1)
-		lease = nil;
-		retried = 0;
-		while lease.nil?
-			begin
-				lease = @azure_blob.acquire_blob_lease(container, blob_name, {timeout: 60, duration: registry_lease_duration})
-			rescue StandardError=> exc
-				if exc.class.name.include?('LeaseAlreadyPresent')
-					if retried > retry_times
-						raise
-					end
-					retried += 1
-					sleep interval_sec
-				else
-					# Anything else happend other than 'LeaseAlreadyPresent', break the lease. This is a work-around for the behavior that when
-					# timeout exception is hit, somehow, a infinite lease will be put on the lock file.
-					@azure_blob.break_blob_lease(container, blob_name, {break_period: 30})
-				end
-			end
-		end
-		return lease
-	end
-
 	def request_registry_update(start_index, content_length, blob_name, new_etag, gen)
 		new_offset = start_index
 		new_offset += content_length unless content_length.nil?
@@ -295,11 +269,11 @@ class LogStash::Inputs::LogstashInputAzureblob < LogStash::Inputs::Base
 	# Return the next blob for reading as well as the start index.
 	def register_for_read
 		begin
-			all_blobs = list_all_blobs
-			registryBlob = all_blobs.find {|item| item.name.downcase == registry_path}
+			filtered_blobs = list_filtered_blobs
+			registryBlob = filtered_blobs.find {|item| item.name.downcase == registry_path}
 			
-			candidate_blobs = all_blobs.select {|item| item.name.downcase != registry_path}
-			all_blobs = nil #gc
+			candidate_blobs = filtered_blobs.select {|item| item.name.downcase != registry_path}
+			filtered_blobs = nil #gc
 
 			if registryBlob
 				registry = load_registry
@@ -446,6 +420,32 @@ class LogStash::Inputs::LogstashInputAzureblob < LogStash::Inputs::Base
 		registry_json = registry.to_json
 
 		@azure_blob.create_block_blob(container, registry_path, registry_json, lease_id: lease_id)
+	end
+
+	# Acquire a lease on a blob item with retries.
+	#
+	# By default, it will retry 60 times with 1 second interval.
+	def acquire_lease(blob_name, retry_times = 60, interval_sec = 1)
+		lease = nil;
+		retried = 0;
+		while lease.nil?
+			begin
+				lease = @azure_blob.acquire_blob_lease(container, blob_name, {timeout: 60, duration: registry_lease_duration})
+			rescue StandardError=> exc
+				if exc.class.name.include?('LeaseAlreadyPresent')
+					if retried > retry_times
+						raise
+					end
+					retried += 1
+					sleep interval_sec
+				else
+					# Anything else happend other than 'LeaseAlreadyPresent', break the lease. This is a work-around for the behavior that when
+					# timeout exception is hit, somehow, a infinite lease will be put on the lock file.
+					@azure_blob.break_blob_lease(container, blob_name, {break_period: 30})
+				end
+			end
+		end
+		return lease
 	end
 
 	def log_error(exc)
