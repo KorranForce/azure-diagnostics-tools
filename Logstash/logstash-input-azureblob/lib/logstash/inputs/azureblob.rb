@@ -304,10 +304,10 @@ class LogStash::Inputs::LogstashInputAzureblob < LogStash::Inputs::Base
 				}
 				candidate_blobs = nil #gc
 
-				oldestModifiedBlob = picked_blobs.min_by {|b| b.properties[:last_modified]}
+				oldestModifiedBlob = picked_blobs.min_by {|b| lastModifiedTime(b)}
 				youngestGenerationBlob = picked_blobs.min_by {|b| registry[b.name].gen}
 				picked_blobs = nil #gc
-				if oldestModifiedBlob && oldestModifiedBlob
+				if oldestModifiedBlob && oldestModifiedBlob #TODO: inspect true reason of possible nils here
 					picked_blob = lastModifiedTime(youngestGenerationBlob) - lastModifiedTime(oldestModifiedBlob) > interval + interval / 2 ? oldestModifiedBlob : youngestGenerationBlob
 				else
 					picked_blob = oldestModifiedBlob || youngestGenerationBlob
