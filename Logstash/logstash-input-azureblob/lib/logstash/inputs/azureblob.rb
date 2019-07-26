@@ -325,8 +325,8 @@ class LogStash::Inputs::LogstashInputAzureblob < LogStash::Inputs::Base
 				end
 
 				saveRegistry(registry)
+				return picked_blob, start_index, gen
 			}
-			return picked_blob, start_index, gen
 		rescue StandardError=> exc
 			logError(exc)
 			return nil, nil, nil
