@@ -4,8 +4,8 @@ require "logstash/namespace"
 
 require "azure/storage/blob"
 
-require 'json' # for registry content
-require "securerandom" # for generating uuid.
+require 'time'
+require "securerandom" # for generating uuid
 
 require "com/microsoft/json-parser"
 
@@ -304,9 +304,12 @@ class LogStash::Inputs::LogstashInputAzureblob < LogStash::Inputs::Base
 				}
 				candidate_blobs = nil #gc
 
-				#MAX_INTEGER / 1*60*60 (1 hour log rotation for app service) - reads per second we need to reach MAX_INTEGER value for generation with max_by
-				picked_blob = picked_blobs.max_by {|b| registry[b.name].gen}
+				oldestModifiedBlob = picked_blobs.min_by {|b| b.properties[:last_modified]}
+				youngestGenerationBlob = picked_blobs.min_by {|b| registry[b.name].gen}
+				picked_blob = lastModifiedTime(youngestGenerationBlob) - lastModifiedTime(oldestModifiedBlob) > interval + interval / 2 ? oldestModifiedBlob : youngestGenerationBlob
 				picked_blobs = nil #gc
+				youngestGenerationBlob = nil #gc
+				oldestModifiedBlob = nil #gc
 				start_index = 0
 				gen = 0
 				if picked_blob
@@ -324,6 +327,10 @@ class LogStash::Inputs::LogstashInputAzureblob < LogStash::Inputs::Base
 			logError(exc)
 			return nil, nil, nil
 		end
+	end
+
+	def lastModifiedTime(blob)
+		Time.parse(blob.properties[:last_modified])
 	end
 
 	def findRegistryBlob(blobs)
