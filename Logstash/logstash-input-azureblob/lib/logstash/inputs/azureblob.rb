@@ -306,8 +306,12 @@ class LogStash::Inputs::LogstashInputAzureblob < LogStash::Inputs::Base
 
 				oldestModifiedBlob = picked_blobs.min_by {|b| b.properties[:last_modified]}
 				youngestGenerationBlob = picked_blobs.min_by {|b| registry[b.name].gen}
-				picked_blob = lastModifiedTime(youngestGenerationBlob) - lastModifiedTime(oldestModifiedBlob) > interval + interval / 2 ? oldestModifiedBlob : youngestGenerationBlob
 				picked_blobs = nil #gc
+				if oldestModifiedBlob && oldestModifiedBlob
+					picked_blob = lastModifiedTime(youngestGenerationBlob) - lastModifiedTime(oldestModifiedBlob) > interval + interval / 2 ? oldestModifiedBlob : youngestGenerationBlob
+				else
+					picked_blob = oldestModifiedBlob || youngestGenerationBlob
+				end
 				youngestGenerationBlob = nil #gc
 				oldestModifiedBlob = nil #gc
 				start_index = 0
@@ -416,6 +420,6 @@ class LogStash::Inputs::LogstashInputAzureblob < LogStash::Inputs::Base
 	end
 
 	def logError(exc)
-		@logger.error(exc)
+		@logger.error("#{exc} #{exc.backtrace}", exception: exc)
 	end
 end
